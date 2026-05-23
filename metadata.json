@@ -1,0 +1,6 @@
+{
+  "name": "Lesspecad",
+  "description": "Ultra sade, eklenti, gizlilik ve reklam engelleyici destekli modern tarayıcı.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
