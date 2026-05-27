@@ -72,6 +72,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -99,6 +101,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        if (intent?.action == "com.example.ACTION_WIDGET_CLICK") {
+            handleWidgetIntent(intent)
+        }
 
         // Asynchronously pre-compile and load the expanded local adblock rule database from assets
         lifecycleScope.launch {
@@ -148,6 +154,29 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == "com.example.ACTION_WIDGET_CLICK") {
+            handleWidgetIntent(intent)
+        }
+    }
+
+    private fun handleWidgetIntent(intent: Intent?) {
+        val widgetAction = intent?.getStringExtra("EXTRA_WIDGET_ACTION") ?: return
+        val actionType = when (widgetAction) {
+            "search" -> WidgetAction.FOCUS_SEARCH
+            "new_tab" -> WidgetAction.OPEN_NEW_TAB
+            "incognito" -> WidgetAction.OPEN_INCOGNITO
+            "bookmarks" -> WidgetAction.OPEN_BOOKMARKS
+            "history" -> WidgetAction.OPEN_HISTORY
+            else -> WidgetAction.NONE
+        }
+        if (actionType != WidgetAction.NONE) {
+            viewModel.triggerWidgetAction(actionType)
         }
     }
 
@@ -955,6 +984,47 @@ fun BrowserMainScreen(
     var showSyncSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
 
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(viewModel) {
+        suspend fun handleAction(action: WidgetAction) {
+            when (action) {
+                WidgetAction.FOCUS_SEARCH -> {
+                    try {
+                        kotlinx.coroutines.delay(350)
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    } catch (t: Throwable) {
+                        t.printStackTrace()
+                    }
+                }
+                WidgetAction.OPEN_NEW_TAB -> {
+                    viewModel.createNewTab("about:blank", false)
+                }
+                WidgetAction.OPEN_INCOGNITO -> {
+                    viewModel.createNewTab("about:blank", true)
+                }
+                WidgetAction.OPEN_BOOKMARKS -> {
+                    showBookmarksSheet = true
+                }
+                WidgetAction.OPEN_HISTORY -> {
+                    showHistorySheet = true
+                }
+                WidgetAction.NONE -> {}
+            }
+        }
+
+        val pending = viewModel.pendingWidgetAction
+        if (pending != WidgetAction.NONE) {
+            viewModel.consumeWidgetAction()
+            handleAction(pending)
+        }
+
+        viewModel.widgetActionFlow.collect { action ->
+            handleAction(action)
+        }
+    }
+
     // Synchronize Input Field with Active Tab's Loaded URL
     LaunchedEffect(activeTab?.url) {
         val currentUrl = activeTab?.url ?: "about:blank"
@@ -1309,6 +1379,7 @@ fun BrowserMainScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag("address_bar")
+                                .focusRequester(focusRequester)
                                 .onFocusChanged { focusState ->
                                     if (focusState.isFocused) {
                                         if (!isAddressFocused) {

@@ -13,10 +13,32 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+enum class WidgetAction {
+    NONE, FOCUS_SEARCH, OPEN_NEW_TAB, OPEN_INCOGNITO, OPEN_BOOKMARKS, OPEN_HISTORY
+}
+
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = BrowserDatabase.getDatabase(application)
     val repository = BrowserRepository(application, db.browserDao())
+
+    // --- Widget Action Flow ---
+    var pendingWidgetAction: WidgetAction = WidgetAction.NONE
+        private set
+
+    private val _widgetActionFlow = MutableSharedFlow<WidgetAction>(extraBufferCapacity = 16)
+    val widgetActionFlow = _widgetActionFlow.asSharedFlow()
+
+    fun triggerWidgetAction(action: WidgetAction) {
+        pendingWidgetAction = action
+        viewModelScope.launch {
+            _widgetActionFlow.emit(action)
+        }
+    }
+
+    fun consumeWidgetAction() {
+        pendingWidgetAction = WidgetAction.NONE
+    }
 
     // --- State Streams ---
     val bookmarks: StateFlow<List<Bookmark>> = repository.allBookmarks
