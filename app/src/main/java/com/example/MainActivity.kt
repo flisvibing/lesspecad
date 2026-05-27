@@ -1010,7 +1010,13 @@ fun BrowserMainScreen(
                         builtInZoomControls = true
                         displayZoomControls = false
                         mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        userAgentString = "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Lesspecad/1.0"
+                        userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                    }
+
+                    // Enable general and third-party cookies for seamless Google Sign-In
+                    CookieManager.getInstance().let { cm ->
+                        cm.setAcceptCookie(true)
+                        cm.setAcceptThirdPartyCookies(this, true)
                     }
 
                     // Built-in Ad-Block mechanism via WebResourceRequest interceptor
@@ -1208,6 +1214,9 @@ fun BrowserMainScreen(
             activeWebView?.clearHistory()
         } else {
             cookieManager.setAcceptCookie(true)
+            if (activeWebView != null) {
+                cookieManager.setAcceptThirdPartyCookies(activeWebView, true)
+            }
             activeWebView?.settings?.cacheMode = WebSettings.LOAD_DEFAULT
             activeWebView?.settings?.databaseEnabled = true
             activeWebView?.settings?.domStorageEnabled = true
