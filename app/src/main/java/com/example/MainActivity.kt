@@ -1511,13 +1511,11 @@ fun BrowserMainScreen(
                 containerColor = colors.surface,
                 tonalElevation = 0.dp,
                 modifier = Modifier
-                    .height(64.dp)
                     .border(0.5.dp, colors.tintBorder, RectangleShape)
             ) {
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding(),
+                        .fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
