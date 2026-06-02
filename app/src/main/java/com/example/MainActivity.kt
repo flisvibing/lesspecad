@@ -396,10 +396,11 @@ fun OnboardingScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Image(
-                                painter = painterResource(id = R.drawable.lesspecad_logo),
+                                painter = painterResource(id = R.drawable.lesspecad),
                                 contentDescription = "Lesspecad Logo",
                                 modifier = Modifier
                                     .size(24.dp)
+                                    .background(Color.White, RoundedCornerShape(6.dp))
                                     .clip(RoundedCornerShape(6.dp))
                             )
                             Text(
@@ -454,12 +455,13 @@ fun OnboardingScreen(
                                 .padding(horizontal = 8.dp)
                         ) {
                             Image(
-                                painter = painterResource(id = R.drawable.lesspecad_logo),
+                                painter = painterResource(id = R.drawable.lesspecad),
                                 contentDescription = "Lesspecad Logo",
                                 modifier = Modifier
                                     .size(96.dp)
-                                    .clip(RoundedCornerShape(20.dp))
                                     .shadow(4.dp, RoundedCornerShape(20.dp))
+                                    .background(Color.White, RoundedCornerShape(20.dp))
+                                    .clip(RoundedCornerShape(20.dp))
                             )
                             
                             Text(
