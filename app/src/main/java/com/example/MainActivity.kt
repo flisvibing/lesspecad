@@ -80,6 +80,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.layout.ContentScale
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -967,6 +973,7 @@ fun BrowserMainScreen(
     val currentReaderContent by viewModel.currentReaderContent.collectAsStateWithLifecycle()
 
     val activeTab = tabs.find { it.id == activeTabId } ?: tabs.firstOrNull()
+    val tabPreviews = remember { mutableStateMapOf<String, Bitmap>() }
 
     var inputUrl by remember { mutableStateOf(TextFieldValue("")) }
     var isAddressFocused by remember { mutableStateOf(false) }
@@ -1150,6 +1157,27 @@ fun BrowserMainScreen(
                             webProgress = 100
                             canGoBack = view?.canGoBack() ?: false
                             canGoForward = view?.canGoForward() ?: false
+
+                            view?.let { webView ->
+                                webView.postDelayed({
+                                    try {
+                                        val w = webView.width
+                                        val h = webView.height
+                                        if (w > 0 && h > 0) {
+                                            val scale = 0.3f
+                                            val sWidth = (w * scale).toInt().coerceAtLeast(1)
+                                            val sHeight = (h * scale).toInt().coerceAtLeast(1)
+                                            val bitmap = Bitmap.createBitmap(sWidth, sHeight, Bitmap.Config.ARGB_8888)
+                                            val canvas = Canvas(bitmap)
+                                            canvas.scale(scale, scale)
+                                            webView.draw(canvas)
+                                            tabPreviews[key] = bitmap
+                                        }
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
+                                }, 600)
+                            }
 
                             val pageTitle = view?.title ?: ""
                             url?.let {
@@ -1468,7 +1496,28 @@ fun BrowserMainScreen(
                             .size(36.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .border(1.dp, colors.primary, RoundedCornerShape(10.dp))
-                            .clickable { showTabsSheet = true },
+                            .clickable {
+                                // Take fresh snapshot of each active WebView in pool
+                                webViewPool.forEach { (tabId, wb) ->
+                                    try {
+                                        val w = wb.width
+                                        val h = wb.height
+                                        if (w > 0 && h > 0) {
+                                            val scale = 0.3f
+                                            val sWidth = (w * scale).toInt().coerceAtLeast(1)
+                                            val sHeight = (h * scale).toInt().coerceAtLeast(1)
+                                            val bitmap = Bitmap.createBitmap(sWidth, sHeight, Bitmap.Config.ARGB_8888)
+                                            val canvas = Canvas(bitmap)
+                                            canvas.scale(scale, scale)
+                                            wb.draw(canvas)
+                                            tabPreviews[tabId] = bitmap
+                                        }
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
+                                }
+                                showTabsSheet = true
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -1804,310 +1853,394 @@ fun BrowserMainScreen(
         }
     }
 
-    // B. Live Tabs & Tab Groups Sheet
+    // B. Live Tabs & Tab Groups Sheet - Full Immersive Screen
     if (showTabsSheet) {
-        ModalBottomSheet(
+        Dialog(
             onDismissRequest = { showTabsSheet = false },
-            containerColor = colors.surface,
-            tonalElevation = 0.dp
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
+            )
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxHeight(0.85f)
-                    .fillMaxWidth()
-                    .padding(24.dp)
-                    .navigationBarsPadding(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+            BackHandler {
+                showTabsSheet = false
+            }
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = colors.background
             ) {
                 var selectedGroupIdFilter by remember { mutableStateOf<String?>(null) }
                 var showGroupCreateDialog by remember { mutableStateOf(false) }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = Locales.getText(appLanguage, "active_tabs"),
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.primary
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(
-                            onClick = { showGroupCreateDialog = true }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Folder,
-                                contentDescription = Locales.getText(appLanguage, "add_group"),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(Locales.getText(appLanguage, "add_group"), fontSize = 11.sp, color = colors.primary)
-                        }
-
-                        IconButton(
-                            onClick = {
-                                viewModel.createNewTab("about:blank", false)
-                                showTabsSheet = false
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = Locales.getText(appLanguage, "add_new_tab"),
-                                tint = colors.primary
-                            )
-                        }
-                    }
-                }
-
-                // Horizontal list of groups to filter open tabs
-                Row(
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        .fillMaxSize()
+                        .systemBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // "All" filter pill
-                    TabGroupPill(
-                        name = Locales.getText(appLanguage, "all"),
-                        isSelected = selectedGroupIdFilter == null,
-                        color = colors.primary,
-                        onClick = { selectedGroupIdFilter = null }
-                    )
-
-                    tabGroups.forEach { group ->
-                        TabGroupPill(
-                            name = group.name,
-                            isSelected = selectedGroupIdFilter == group.id,
-                            color = getGroupDotColor(group.colorIndex),
-                            onClick = { selectedGroupIdFilter = group.id }
-                        )
-                    }
-                }
-
-                // Scrollable Grid of open tabs
-                val filteredTabs = if (selectedGroupIdFilter == null) tabs else tabs.filter { it.groupId == selectedGroupIdFilter }
-
-                if (filteredTabs.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
+                    // Title and Close Toolbar
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        IconButton(
+                            onClick = { showTabsSheet = false },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = Locales.getText(appLanguage, "close"),
+                                tint = colors.onBackground
+                            )
+                        }
+
                         Text(
-                            text = Locales.getText(appLanguage, "no_tabs_in_group"),
-                            fontSize = 12.sp,
-                            color = colors.onBackground.copy(alpha = 0.4f)
+                            text = Locales.getText(appLanguage, "active_tabs") + " (${tabs.size})",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primary
                         )
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(
+                                onClick = { showGroupCreateDialog = true }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Folder,
+                                    contentDescription = Locales.getText(appLanguage, "add_group"),
+                                    modifier = Modifier.size(16.dp),
+                                    tint = colors.primary
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(Locales.getText(appLanguage, "add_group"), fontSize = 12.sp, color = colors.primary)
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    viewModel.createNewTab("about:blank", false)
+                                    showTabsSheet = false
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = Locales.getText(appLanguage, "add_new_tab"),
+                                    tint = colors.primary
+                                )
+                            }
+                        }
                     }
-                } else {
-                    LazyColumn(
+
+                    // Horizontal list of groups to filter open tabs
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .horizontalScroll(rememberScrollState())
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(filteredTabs, key = { it.id }) { tab ->
-                            val isCurrentActive = tab.id == activeTabId
-                            var showGroupAssignSheet by remember { mutableStateOf(false) }
+                        // "All" filter pill
+                        TabGroupPill(
+                            name = Locales.getText(appLanguage, "all"),
+                            isSelected = selectedGroupIdFilter == null,
+                            color = colors.primary,
+                            onClick = { selectedGroupIdFilter = null }
+                        )
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isCurrentActive) colors.accentLight else colors.background)
-                                    .combinedClickable(
-                                        onClick = {
-                                            viewModel.selectTab(tab.id)
-                                            showTabsSheet = false
-                                        },
-                                        onLongClick = {
-                                            showGroupAssignSheet = true
-                                        }
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isCurrentActive) colors.primary else colors.tintBorder,
-                                        shape = RoundedCornerShape(12.dp)
-                                      )
-                                    .padding(vertical = 12.dp, horizontal = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Group color point if assigned
-                                tab.groupId?.let { currentGroupId ->
-                                    val matchGroup = tabGroups.find { g -> g.id == currentGroupId }
-                                    if (matchGroup != null) {
+                        tabGroups.forEach { group ->
+                            TabGroupPill(
+                                name = group.name,
+                                isSelected = selectedGroupIdFilter == group.id,
+                                color = getGroupDotColor(group.colorIndex),
+                                onClick = { selectedGroupIdFilter = group.id }
+                            )
+                        }
+                    }
+
+                    // Scrollable Grid of open tabs
+                    val filteredTabs = if (selectedGroupIdFilter == null) tabs else tabs.filter { it.groupId == selectedGroupIdFilter }
+
+                    if (filteredTabs.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = Locales.getText(appLanguage, "no_tabs_in_group"),
+                                fontSize = 14.sp,
+                                color = colors.onBackground.copy(alpha = 0.4f)
+                            )
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(filteredTabs, key = { it.id }) { tab ->
+                                val isCurrentActive = tab.id == activeTabId
+                                var showGroupAssignSheet by remember { mutableStateOf(false) }
+
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(1f)
+                                        .border(
+                                            width = if (isCurrentActive) 2.dp else 1.dp,
+                                            color = if (isCurrentActive) colors.primary else colors.tintBorder,
+                                            shape = RoundedCornerShape(12.dp)
+                                        )
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .combinedClickable(
+                                            onClick = {
+                                                viewModel.selectTab(tab.id)
+                                                showTabsSheet = false
+                                            },
+                                            onLongClick = {
+                                                showGroupAssignSheet = true
+                                            }
+                                        ),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isCurrentActive) colors.accentLight else colors.background
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        // Tab site preview area occupies upper 68%
                                         Box(
                                             modifier = Modifier
-                                                .padding(end = 10.dp)
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(getGroupDotColor(matchGroup.colorIndex))
-                                        )
+                                                .fillMaxWidth()
+                                                .weight(0.68f)
+                                                .background(if (tab.isIncognito) Color(0xFF1E1E1E) else Color(0xFFF1F3F4)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            val previewBitmap = tabPreviews[tab.id]
+                                            if (previewBitmap != null) {
+                                                Image(
+                                                    bitmap = previewBitmap.asImageBitmap(),
+                                                    contentDescription = null,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            } else {
+                                                // Beautiful fallback favicon/icon inside preview circle container
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(40.dp)
+                                                        .clip(CircleShape)
+                                                        .background(colors.accentLight),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (tab.isIncognito) Icons.Default.VisibilityOff else Icons.Default.Public,
+                                                        contentDescription = null,
+                                                        tint = if (tab.isIncognito) Color.White.copy(alpha = 0.6f) else colors.primary.copy(alpha = 0.6f),
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            // Top-right close button overlay
+                                            IconButton(
+                                                onClick = { viewModel.closeTab(tab.id) },
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(6.dp)
+                                                    .size(24.dp)
+                                                    .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = Locales.getText(appLanguage, "close_tab"),
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                            }
+
+                                            // Top-left group notification point
+                                            val matchGroup = tab.groupId?.let { currentGroupId ->
+                                                tabGroups.find { g -> g.id == currentGroupId }
+                                            }
+                                            if (matchGroup != null) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopStart)
+                                                        .padding(8.dp)
+                                                        .size(10.dp)
+                                                        .clip(CircleShape)
+                                                        .background(getGroupDotColor(matchGroup.colorIndex))
+                                                        .border(1.dp, Color.White, CircleShape)
+                                                )
+                                            }
+                                        }
+
+                                        // Site credentials info occupies lower 32%
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .weight(0.32f)
+                                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Text(
+                                                text = tab.title,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isCurrentActive) FontWeight.Bold else FontWeight.Normal,
+                                                color = colors.onBackground,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.height(1.dp))
+                                            Text(
+                                                text = if (tab.url == "about:blank") Locales.getText(appLanguage, "blank_page") else tab.url.removePrefix("https://").removePrefix("http://").removePrefix("www."),
+                                                fontSize = 8.sp,
+                                                color = colors.onBackground.copy(alpha = 0.5f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
 
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = tab.title,
-                                        fontSize = 13.sp,
-                                        fontWeight = if (isCurrentActive) FontWeight.Bold else FontWeight.Normal,
-                                        color = colors.onBackground,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = if (tab.url == "about:blank") Locales.getText(appLanguage, "blank_page") else tab.url,
-                                        fontSize = 10.sp,
-                                        color = colors.onBackground.copy(alpha = 0.45f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = { viewModel.closeTab(tab.id) },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = Locales.getText(appLanguage, "close_tab"),
-                                        tint = colors.onBackground.copy(alpha = 0.5f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-
-                            // Sub-sheet to assign tab to localized group
-                            if (showGroupAssignSheet) {
-                                AlertDialog(
-                                    onDismissRequest = { showGroupAssignSheet = false },
-                                    containerColor = colors.surface,
-                                    title = { Text(Locales.getText(appLanguage, "save_to_group"), fontSize = 15.sp, fontWeight = FontWeight.Bold) },
-                                    text = {
-                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text(
-                                                text = Locales.getText(appLanguage, "select_group_for_tab"),
-                                                fontSize = 12.sp,
-                                                color = colors.onBackground.copy(alpha = 0.6f)
-                                            )
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            // Assign to no group
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(colors.background)
-                                                    .clickable {
-                                                        viewModel.saveTabToGroup(tab.id, null)
-                                                        showGroupAssignSheet = false
-                                                    }
-                                                    .padding(12.dp)
-                                            ) {
-                                                Text(Locales.getText(appLanguage, "none"), fontSize = 12.sp, color = colors.onBackground)
-                                            }
-                                            tabGroups.forEach { group ->
+                                // Sub-sheet to assign tab to localized group
+                                if (showGroupAssignSheet) {
+                                    AlertDialog(
+                                        onDismissRequest = { showGroupAssignSheet = false },
+                                        containerColor = colors.surface,
+                                        title = { Text(Locales.getText(appLanguage, "save_to_group"), fontSize = 15.sp, fontWeight = FontWeight.Bold) },
+                                        text = {
+                                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Text(
+                                                    text = Locales.getText(appLanguage, "select_group_for_tab"),
+                                                    fontSize = 12.sp,
+                                                    color = colors.onBackground.copy(alpha = 0.6f)
+                                                )
+                                                Spacer(modifier = Modifier.height(6.dp))
+                                                // Assign to no group
                                                 Row(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .clip(RoundedCornerShape(8.dp))
-                                                    .background(colors.background)
-                                                    .clickable {
-                                                        viewModel.saveTabToGroup(tab.id, group.id)
-                                                        showGroupAssignSheet = false
-                                                    }
-                                                    .padding(12.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
+                                                        .background(colors.background)
+                                                        .clickable {
+                                                            viewModel.saveTabToGroup(tab.id, null)
+                                                            showGroupAssignSheet = false
+                                                        }
+                                                        .padding(12.dp)
                                                 ) {
-                                                    Box(
+                                                    Text(Locales.getText(appLanguage, "none"), fontSize = 12.sp, color = colors.onBackground)
+                                                }
+                                                tabGroups.forEach { group ->
+                                                    Row(
                                                         modifier = Modifier
-                                                            .size(8.dp)
-                                                            .clip(CircleShape)
-                                                            .background(getGroupDotColor(group.colorIndex))
-                                                    )
-                                                    Spacer(modifier = Modifier.width(10.dp))
-                                                    Text(group.name, fontSize = 12.sp, color = colors.onBackground)
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .background(colors.background)
+                                                            .clickable {
+                                                                viewModel.saveTabToGroup(tab.id, group.id)
+                                                                showGroupAssignSheet = false
+                                                            }
+                                                            .padding(12.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(8.dp)
+                                                                .clip(CircleShape)
+                                                                .background(getGroupDotColor(group.colorIndex))
+                                                        )
+                                                        Spacer(modifier = Modifier.width(10.dp))
+                                                        Text(group.name, fontSize = 12.sp, color = colors.onBackground)
+                                                    }
                                                 }
                                             }
+                                        },
+                                        confirmButton = {
+                                            TextButton(onClick = { showGroupAssignSheet = false }) {
+                                                Text(Locales.getText(appLanguage, "cancel"), color = colors.primary)
+                                            }
                                         }
-                                    },
-                                    confirmButton = {
-                                        TextButton(onClick = { showGroupAssignSheet = false }) {
-                                            Text(Locales.getText(appLanguage, "cancel"), color = colors.primary)
-                                        }
-                                    }
-                                )
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                // Modal dialog to compile a new Tab Category Group
-                if (showGroupCreateDialog) {
-                    var newGroupName by remember { mutableStateOf("") }
-                    var selectedColorIndex by remember { mutableStateOf(0) }
+                    // Modal dialog to compile a new Tab Category Group
+                    if (showGroupCreateDialog) {
+                        var newGroupName by remember { mutableStateOf("") }
+                        var selectedColorIndex by remember { mutableStateOf(0) }
 
-                    AlertDialog(
-                        onDismissRequest = { showGroupCreateDialog = false },
-                        containerColor = colors.surface,
-                        title = { Text(Locales.getText(appLanguage, "new_tab_group"), fontSize = 15.sp, fontWeight = FontWeight.Bold) },
-                        text = {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                OutlinedTextField(
-                                    value = newGroupName,
-                                    onValueChange = { newGroupName = it },
-                                    label = { Text(Locales.getText(appLanguage, "group_name")) },
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = colors.primary,
-                                        focusedLabelColor = colors.primary
+                        AlertDialog(
+                            onDismissRequest = { showGroupCreateDialog = false },
+                            containerColor = colors.surface,
+                            title = { Text(Locales.getText(appLanguage, "new_tab_group"), fontSize = 15.sp, fontWeight = FontWeight.Bold) },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    OutlinedTextField(
+                                        value = newGroupName,
+                                        onValueChange = { newGroupName = it },
+                                        label = { Text(Locales.getText(appLanguage, "group_name")) },
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = colors.primary,
+                                            focusedLabelColor = colors.primary
+                                        )
                                     )
-                                )
 
-                                Column {
-                                    Text(Locales.getText(appLanguage, "group_color"), fontSize = 12.sp, color = colors.onBackground.copy(alpha = 0.5f))
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        for (i in 0..4) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(24.dp)
-                                                    .clip(CircleShape)
-                                                    .background(getGroupDotColor(i))
-                                                    .clickable { selectedColorIndex = i }
-                                                    .border(
-                                                        width = 2.dp,
-                                                        color = if (selectedColorIndex == i) colors.primary else Color.Transparent,
-                                                        shape = CircleShape
-                                                    )
-                                            )
+                                    Column {
+                                        Text(Locales.getText(appLanguage, "group_color"), fontSize = 12.sp, color = colors.onBackground.copy(alpha = 0.5f))
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            for (i in 0..4) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(24.dp)
+                                                        .clip(CircleShape)
+                                                        .background(getGroupDotColor(i))
+                                                        .clickable { selectedColorIndex = i }
+                                                        .border(
+                                                            width = 2.dp,
+                                                            color = if (selectedColorIndex == i) colors.primary else Color.Transparent,
+                                                            shape = CircleShape
+                                                        )
+                                                )
+                                            }
                                         }
                                     }
                                 }
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        if (newGroupName.isNotBlank()) {
+                                            viewModel.createTabGroup(newGroupName, selectedColorIndex)
+                                            showGroupCreateDialog = false
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
+                                ) {
+                                    Text(Locales.getText(appLanguage, "create"), color = Color.White)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showGroupCreateDialog = false }) {
+                                    Text(Locales.getText(appLanguage, "cancel"), color = colors.primary)
+                                }
                             }
-                        },
-                        confirmButton = {
-                            Button(
-                                onClick = {
-                                    if (newGroupName.isNotBlank()) {
-                                        viewModel.createTabGroup(newGroupName, selectedColorIndex)
-                                        showGroupCreateDialog = false
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
-                            ) {
-                                Text(Locales.getText(appLanguage, "create"), color = Color.White)
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showGroupCreateDialog = false }) {
-                                Text(Locales.getText(appLanguage, "cancel"), color = colors.primary)
-                            }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
