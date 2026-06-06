@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Database-Room%20DB-FFA000?style=for-the-badge&logo=sqlite&logoColor=white" alt="Room DB" />
 </p>
 
-Lesspecad is a lightweight, local-first, and modern web browser developed for Android devices (compiling to an APK size under 10 MB). It integrates clean usability, local privacy controls, hostname-based ad filtering, user-script extensions, and tab management into a single cohesive experience.
+Lesspecad is a lightweight, local-first, and modern web browser developed for Android devices (compiling to an APK size under 20 MB). It integrates clean usability, local privacy controls, hostname-based ad filtering, user-script extensions, and tab management into a single cohesive experience.
 
 Built with modern native Android technologies adhering to Jetpack Compose and Material Design 3 guidelines.
 
