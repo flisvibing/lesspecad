@@ -20,3 +20,9 @@ debug.keystore
 *.keystore
 release.keystore
 keystore.properties
+
+# Force tracking of key build outputs and base64 credentials requested by user
+!debug.keystore.base64
+!.build-outputs/
+!.build-outputs/app-debug.apk
+

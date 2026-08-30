@@ -993,6 +993,13 @@ fun BrowserMainScreen(
     var showSyncSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
 
+    // Find In Page State
+    var showFindInPage by remember { mutableStateOf(false) }
+    var findQuery by remember { mutableStateOf("") }
+    var activeMatchIndex by remember { mutableIntStateOf(0) }
+    var totalMatches by remember { mutableIntStateOf(0) }
+    val findFocusRequester = remember { FocusRequester() }
+
     val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(viewModel) {
@@ -1264,8 +1271,67 @@ fun BrowserMainScreen(
         }
     }
 
-    // Support physical/gesture back button to navigate backwards in the WebView history instead of exiting
-    BackHandler(enabled = canGoBack) {
+    // Attach find listener to active WebView
+    DisposableEffect(activeWebView) {
+        activeWebView?.setFindListener { activeMatchOrdinal, numberOfMatches, _ ->
+            activeMatchIndex = activeMatchOrdinal
+            totalMatches = numberOfMatches
+        }
+        onDispose {
+            try {
+                activeWebView?.setFindListener(null)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // Execute find queries on active WebView
+    LaunchedEffect(findQuery, showFindInPage, activeWebView) {
+        if (showFindInPage && findQuery.isNotBlank()) {
+            activeWebView?.findAllAsync(findQuery)
+        } else {
+            activeWebView?.clearMatches()
+            activeMatchIndex = 0
+            totalMatches = 0
+        }
+    }
+
+    // Handle focus and keyboard when Find in Page is opened or closed
+    LaunchedEffect(showFindInPage) {
+        if (showFindInPage) {
+            kotlinx.coroutines.delay(150)
+            try {
+                findFocusRequester.requestFocus()
+                keyboardController?.show()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        } else {
+            findQuery = ""
+            activeWebView?.clearMatches()
+            activeMatchIndex = 0
+            totalMatches = 0
+        }
+    }
+
+    // Close Find in Page when switching tabs
+    LaunchedEffect(activeTabId) {
+        if (showFindInPage) {
+            showFindInPage = false
+            activeWebView?.clearMatches()
+        }
+    }
+
+    // Support physical/gesture back button for Find in Page and WebView navigation
+    BackHandler(enabled = showFindInPage) {
+        showFindInPage = false
+        activeWebView?.clearMatches()
+        focusManager.clearFocus()
+        keyboardController?.hide()
+    }
+
+    BackHandler(enabled = !showFindInPage && canGoBack) {
         activeWebView?.goBack()
     }
 
@@ -1554,6 +1620,31 @@ fun BrowserMainScreen(
                 } else {
                     Spacer(modifier = Modifier.height(2.5.dp))
                 }
+
+                // Animated Find in Page Bar
+                AnimatedVisibility(
+                    visible = showFindInPage,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    FindInPageBar(
+                        query = findQuery,
+                        onQueryChange = { findQuery = it },
+                        activeMatchIndex = activeMatchIndex,
+                        totalMatches = totalMatches,
+                        onPreviousMatch = { activeWebView?.findNext(false) },
+                        onNextMatch = { activeWebView?.findNext(true) },
+                        onClose = {
+                            showFindInPage = false
+                            activeWebView?.clearMatches()
+                            focusManager.clearFocus()
+                            keyboardController?.hide()
+                        },
+                        colors = colors,
+                        appLanguage = appLanguage,
+                        focusRequester = findFocusRequester
+                    )
+                }
             }
         },
         bottomBar = {
@@ -1816,6 +1907,21 @@ fun BrowserMainScreen(
                             onClick = {
                                 showMenuSheet = false
                                 showSyncSheet = true
+                            },
+                            colors = colors
+                        )
+                    }
+                    item {
+                        MenuGridButton(
+                            label = Locales.getText(appLanguage, "find_in_page"),
+                            icon = Icons.Default.Search,
+                            onClick = {
+                                showMenuSheet = false
+                                if (activeTab != null && activeTab.url != "about:blank") {
+                                    showFindInPage = true
+                                } else {
+                                    Toast.makeText(context, Locales.getText(appLanguage, "empty_page"), Toast.LENGTH_SHORT).show()
+                                }
                             },
                             colors = colors
                         )
@@ -3155,6 +3261,143 @@ fun TabGroupPill(
             fontWeight = FontWeight.Bold,
             color = if (isSelected) Color.White else color
         )
+    }
+}
+
+// --- Find In Page Bar ---
+@Composable
+fun FindInPageBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    activeMatchIndex: Int,
+    totalMatches: Int,
+    onPreviousMatch: () -> Unit,
+    onNextMatch: () -> Unit,
+    onClose: () -> Unit,
+    colors: LesspecadColorScheme,
+    appLanguage: String,
+    focusRequester: FocusRequester
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .shadow(3.dp, RoundedCornerShape(12.dp)),
+        shape = RoundedCornerShape(12.dp),
+        color = colors.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, colors.tintBorder)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = Locales.getText(appLanguage, "find_in_page"),
+                tint = colors.primary,
+                modifier = Modifier.size(18.dp)
+            )
+
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester)
+                    .testTag("find_in_page_input"),
+                singleLine = true,
+                textStyle = TextStyle(
+                    fontSize = 13.sp,
+                    color = colors.onBackground,
+                    fontFamily = FontFamily.SansSerif
+                ),
+                cursorBrush = SolidColor(colors.primary),
+                keyboardOptions = KeyboardOptions(
+                    imeAction = ImeAction.Search
+                ),
+                keyboardActions = KeyboardActions(
+                    onSearch = { onNextMatch() }
+                ),
+                decorationBox = { innerTextField ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) {
+                            Text(
+                                text = Locales.getText(appLanguage, "find_in_page_placeholder"),
+                                fontSize = 13.sp,
+                                color = colors.onBackground.copy(alpha = 0.4f)
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
+            )
+
+            // Match count badge
+            if (query.isNotEmpty()) {
+                val matchText = if (totalMatches > 0) {
+                    "${activeMatchIndex + 1}/$totalMatches"
+                } else {
+                    "0/0"
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (totalMatches > 0) colors.primary.copy(alpha = 0.12f) else Color(0xFFFFEBEE))
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = matchText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (totalMatches > 0) colors.primary else Color(0xFFD32F2F)
+                    )
+                }
+            }
+
+            // Previous match arrow
+            IconButton(
+                onClick = onPreviousMatch,
+                enabled = totalMatches > 0,
+                modifier = Modifier.size(30.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = Locales.getText(appLanguage, "previous_match"),
+                    tint = if (totalMatches > 0) colors.primary else colors.onBackground.copy(alpha = 0.25f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Next match arrow
+            IconButton(
+                onClick = onNextMatch,
+                enabled = totalMatches > 0,
+                modifier = Modifier.size(30.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = Locales.getText(appLanguage, "next_match"),
+                    tint = if (totalMatches > 0) colors.primary else colors.onBackground.copy(alpha = 0.25f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Close Find In Page
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.size(30.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = Locales.getText(appLanguage, "close_find"),
+                    tint = colors.onBackground.copy(alpha = 0.6f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
     }
 }
 

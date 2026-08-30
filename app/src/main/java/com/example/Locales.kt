@@ -119,7 +119,12 @@ object Locales {
             "extension" to "Extension",
             "home" to "Home",
             "empty_page" to "Empty Page",
-            "search_or_type_placeholder" to "Search or enter URL"
+            "search_or_type_placeholder" to "Search or enter URL",
+            "find_in_page" to "Find in Page",
+            "find_in_page_placeholder" to "Find in page...",
+            "previous_match" to "Previous match",
+            "next_match" to "Next match",
+            "close_find" to "Close search"
         ),
         "tr" to mapOf(
             "welcome" to "Merhaba.",
@@ -234,7 +239,12 @@ object Locales {
             "extension" to "Eklenti",
             "home" to "Anasayfa",
             "empty_page" to "Boş Sayfa",
-            "search_or_type_placeholder" to "Arama yapın veya URL girin"
+            "search_or_type_placeholder" to "Arama yapın veya URL girin",
+            "find_in_page" to "Sayfada Bul",
+            "find_in_page_placeholder" to "Sayfada ara...",
+            "previous_match" to "Önceki eşleşme",
+            "next_match" to "Sonraki eşleşme",
+            "close_find" to "Aramayı kapat"
         )
     )
 
